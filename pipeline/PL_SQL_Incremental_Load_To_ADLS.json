@@ -237,11 +237,11 @@
 					},
 					"baseParameters": {
 						"raw_input_path": {
-							"value": "@concat('abfss://raw@', '<your-storage-account-name>', '.dfs.core.windows.net/retail/customers/incremental/')",
+							"value": "abfss://raw@adlsretailkart.dfs.core.windows.net/retail/customers/incremental/",
 							"type": "Expression"
 						},
 						"curated_output_path": {
-							"value": "@concat('abfss://curated@', 'adlsretailkart', '.dfs.core.windows.net/retail/dim_customer/')",
+							"value": "abfss://curated@adlsretailkart.dfs.core.windows.net/retail/dim_customer/",
 							"type": "Expression"
 						}
 					}
