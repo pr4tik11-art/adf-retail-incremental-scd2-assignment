@@ -1,0 +1,283 @@
+{
+	"name": "PL_SQL_Incremental_Load_To_ADLS",
+	"properties": {
+		"activities": [
+			{
+				"name": "LKP_OldWatermark",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "@concat('SELECT last_watermark_value FROM dbo.pipeline_watermark WHERE source_table_name = ''', pipeline().parameters.sourceTableName, '''')",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"dataset": {
+						"referenceName": "DS_AzureSQL_Parameterized",
+						"type": "DatasetReference",
+						"parameters": {
+							"schemaName": "dbo",
+							"tableName": "pipeline_watermark"
+						}
+					},
+					"firstRowOnly": true
+				}
+			},
+			{
+				"name": "LKP_NewWatermark",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "LKP_OldWatermark",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "@concat('SELECT MAX(', pipeline().parameters.watermarkColumn, ') AS new_watermark_value FROM ', pipeline().parameters.sourceSchemaName, '.', pipeline().parameters.sourceTableName)",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"dataset": {
+						"referenceName": "DS_AzureSQL_Parameterized",
+						"type": "DatasetReference",
+						"parameters": {
+							"schemaName": {
+								"value": "@pipeline().parameters.sourceSchemaName",
+								"type": "Expression"
+							},
+							"tableName": {
+								"value": "@pipeline().parameters.sourceTableName",
+								"type": "Expression"
+							}
+						}
+					}
+				}
+			},
+			{
+				"name": "CPY_IncrementalLoad",
+				"type": "Copy",
+				"dependsOn": [
+					{
+						"activity": "LKP_NewWatermark",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "@concat('SELECT * FROM ', pipeline().parameters.sourceSchemaName, '.', pipeline().parameters.sourceTableName, ' WHERE ', pipeline().parameters.watermarkColumn, ' > ''', activity('LKP_OldWatermark').output.firstRow.last_watermark_value, ''' AND ', pipeline().parameters.watermarkColumn, ' <= ''', activity('LKP_NewWatermark').output.firstRow.new_watermark_value, '''')",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"sink": {
+						"type": "ParquetSink",
+						"storeSettings": {
+							"type": "AzureBlobFSWriteSettings"
+						},
+						"formatSettings": {
+							"type": "ParquetWriteSettings"
+						}
+					},
+					"enableStaging": false,
+					"translator": {
+						"type": "TabularTranslator",
+						"typeConversion": true,
+						"typeConversionSettings": {
+							"allowDataTruncation": true,
+							"treatBooleanAsNumber": false
+						}
+					}
+				},
+				"inputs": [
+					{
+						"referenceName": "DS_AzureSQL_Parameterized",
+						"type": "DatasetReference",
+						"parameters": {
+							"schemaName": {
+								"value": "@pipeline().parameters.sourceSchemaName",
+								"type": "Expression"
+							},
+							"tableName": {
+								"value": "@pipeline().parameters.sourceTableName",
+								"type": "Expression"
+							}
+						}
+					}
+				],
+				"outputs": [
+					{
+						"referenceName": "DS_ADLS_Parquet_Parameterized",
+						"type": "DatasetReference",
+						"parameters": {
+							"containerName": {
+								"value": "@pipeline().parameters.targetContainer",
+								"type": "Expression"
+							},
+							"folderPath": {
+								"value": "@pipeline().parameters.targetFolderPath",
+								"type": "Expression"
+							},
+							"fileName": {
+								"value": "@pipeline().parameters.targetFileName\n\n\n\n",
+								"type": "Expression"
+							}
+						}
+					}
+				]
+			},
+			{
+				"name": "SP_UpdateWatermark",
+				"type": "SqlServerStoredProcedure",
+				"dependsOn": [
+					{
+						"activity": "CPY_IncrementalLoad",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"storedProcedureName": {
+						"value": "dbo.usp_UpdateWatermark",
+						"type": "Expression"
+					},
+					"storedProcedureParameters": {
+						"new_watermark_value": {
+							"value": {
+								"value": "@activity('LKP_NewWatermark').output.firstRow.new_watermark_value",
+								"type": "Expression"
+							},
+							"type": "DateTime"
+						},
+						"source_table_name": {
+							"value": {
+								"value": "@pipeline().parameters.sourceTableName",
+								"type": "Expression"
+							},
+							"type": "String"
+						}
+					}
+				},
+				"linkedServiceName": {
+					"referenceName": "LS_AzureSQL_Retail",
+					"type": "LinkedServiceReference"
+				}
+			},
+			{
+				"name": "DBR_SCD_Type2",
+				"type": "DatabricksNotebook",
+				"dependsOn": [
+					{
+						"activity": "SP_UpdateWatermark",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"notebookPath": {
+						"value": "/NB_SCD_Type2_Customer_Dimension",
+						"type": "Expression"
+					},
+					"baseParameters": {
+						"raw_input_path": {
+							"value": "@concat('abfss://raw@', '<your-storage-account-name>', '.dfs.core.windows.net/retail/customers/incremental/')",
+							"type": "Expression"
+						},
+						"curated_output_path": {
+							"value": "@concat('abfss://curated@', 'adlsretailkart', '.dfs.core.windows.net/retail/dim_customer/')",
+							"type": "Expression"
+						}
+					}
+				},
+				"linkedServiceName": {
+					"referenceName": "LS_AzureDatabricks",
+					"type": "LinkedServiceReference"
+				}
+			}
+		],
+		"parameters": {
+			"sourceSchemaName": {
+				"type": "string",
+				"defaultValue": "dbo"
+			},
+			"sourceTableName": {
+				"type": "string",
+				"defaultValue": "retail_customers_source"
+			},
+			"watermarkColumn": {
+				"type": "string",
+				"defaultValue": "updated_at"
+			},
+			"targetContainer": {
+				"type": "string",
+				"defaultValue": "raw"
+			},
+			"targetFolderPath": {
+				"type": "string",
+				"defaultValue": "retail/customers/incremental/"
+			},
+			"targetFileName": {
+				"type": "string",
+				"defaultValue": "customers_incremental.parquet"
+			}
+		},
+		"annotations": []
+	}
+}
