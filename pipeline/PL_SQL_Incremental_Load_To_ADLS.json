@@ -232,7 +232,7 @@
 				"userProperties": [],
 				"typeProperties": {
 					"notebookPath": {
-						"value": "/NB_SCD_Type2_Customer_Dimension",
+						"value": "/Workspace/Users/updazvmnag_1777788725142@npupgradassessment.onmicrosoft.com/NB_SCD_Type2_Customer_Dimension",
 						"type": "Expression"
 					},
 					"baseParameters": {
